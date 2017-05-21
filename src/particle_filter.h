@@ -37,8 +37,15 @@ class ParticleFilter {
 	
 	// Vector of weights of all particles
 	std::vector<double> weights;
-	
-public:
+
+ private:
+        std::vector<std::vector<int> > recursive_assoc(std::vector<std::vector<int> > candidates, int idx);
+        double mv_gaussian(std::vector<LandmarkObs> const& observations,
+                           std::vector<int> const& associations,
+                           double sigma[2][2],
+                           Map const& landmark_map);
+
+ public:
 	
 	// Set of current particles
 	std::vector<Particle> particles;

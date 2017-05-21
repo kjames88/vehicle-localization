@@ -14,6 +14,7 @@
 #include <sstream>
 #include <string>
 #include <iterator>
+#include <assert.h>
 
 #include "particle_filter.h"
 
@@ -41,6 +42,23 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
   }
   
   is_initialized = true;
+
+
+  // std::vector<std::vector<int> > test;
+  // std::vector<int> l1 = {1, 2};
+  // std::vector<int> l2 = {3, 6, 5};
+  // std::vector<int> l3 = {6, 7};
+  // std::vector<int> l4 = {8, 9, 10, 11};
+  // test.push_back(l1);
+  // test.push_back(l2);
+  // test.push_back(l3);
+  // test.push_back(l4);
+  // test = recursive_assoc(test, 0);
+  // for (auto it=test.begin(); it!=test.end(); it++) {
+  //   for (auto it2=it->begin(); it2!=it->end(); it2++)
+  //     std::cout << *it2 << ", ";
+  //   std::cout << endl;
+  // }
 }
 
 void ParticleFilter::prediction(double delta_t, double std_pos[], double velocity, double yaw_rate) {
@@ -85,7 +103,7 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 	//   3.33. Note that you'll need to switch the minus sign in that equation to a plus to account 
 	//   for the fact that the map's y-axis actually points downwards.)
 	//   http://planning.cs.uiuc.edu/node99.html
-
+  
   double sigma[2][2] = {std_landmark[0], 0, 0, std_landmark[1]};
   int m = observations.size();
   
@@ -142,9 +160,90 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
       }
       c++;
     }
-    
+    // Compute multivariate gaussian for each combination of reasonable associations
+    // Take the maximum product as the correspondence and weight for the particle
+    // In case of a missing landmark set the weight to a minimum value
+
+    bool fail = false;
+    for (int i=0; i<m; i++) {
+      if (candidates.at(i).empty())
+        fail = true;
+    }
+    if (fail == false) {
+      double w_max = 0.0;
+      std::vector<std::vector<int> > sets = recursive_assoc(candidates, 0);
+      for (auto it=sets.begin(); it!=sets.end(); it++) {
+        double w = mv_gaussian(obs_world, *it, sigma, map_landmarks);
+        if (w > w_max) {
+          w_max = w;
+          particles.at(p).associations = *it;
+        }
+      }
+      weights[p] = w_max;
+    } else {
+      weights[p] = 0.0001;
+    }
+    particles.at(p).weight = weights[p];
   }
   
+}
+
+std::vector<std::vector<int> > ParticleFilter::recursive_assoc(std::vector<std::vector<int> > candidates, int idx) {
+  std::vector<vector<int> > r;
+  if (idx == candidates.size() - 1) {
+    for (auto it=candidates.at(idx).begin(); it != candidates.at(idx).end(); it++) {
+      std::vector<int> e;
+      e.push_back(*it);
+      r.push_back(e);
+    }
+  } else {
+    std::vector<vector<int> > below = recursive_assoc(candidates, idx + 1);
+    for (int i=0; i<candidates.at(idx).size(); i++) {
+      for (auto it = below.begin(); it != below.end(); it++) {
+        // don't create any sets with duplicate entries
+        bool proceed = true;
+        for (auto it2 = it->begin(); it2 != it->end(); it2++) {
+          if (*it2 == candidates.at(idx).at(i))
+            proceed = false;
+        }
+        if (proceed) {
+          std::vector<int> extended;
+          extended.push_back(candidates.at(idx).at(i));
+          extended.insert(extended.end(), it->begin(), it->end());
+          r.push_back(extended);
+        }
+      }
+    }
+  }
+  return r;
+}
+
+double ParticleFilter::mv_gaussian(std::vector<LandmarkObs> const& observations,
+                                   std::vector<int> const& associations,
+                                   double sigma[2][2],
+                                   Map const& landmark_map) {
+
+  // 2x2 matrix inverse:
+  //   http://www.mathcentre.ac.uk/resources/uploaded/sigma-matrices7-2009-1.pdf
+
+  double mult = 1.0 / (sigma[0][0] * sigma[1][1] - sigma[0][1] * sigma[1][0]);
+  double sigma_inv[2][2] = {mult * sigma[1][1], -1.0 * mult * sigma[0][1], -1.0 * mult * sigma[1][0], mult * sigma[0][0]};
+  
+  assert(observations.size() == associations.size());
+  double w = 0.0;
+  int m = observations.size();
+  for (int i=0; i<m; i++) {
+    double delta[2];
+    Map::single_landmark_s landmark = landmark_map.landmark_list.at(associations.at(i));
+    delta[0] = observations.at(i).x - landmark.x_f;
+    delta[1] = observations.at(i).y - landmark.y_f;
+    double e1[2] = {sigma_inv[0][0] * delta[0] + sigma_inv[0][1] * delta[1],
+                    sigma_inv[1][0] * delta[0] + sigma_inv[1][1] * delta[1]};
+    double e = -0.5 * (delta[0] * e1[0] + delta[1] * e1[1]);
+    e = exp(e);
+  }
+  
+  return w;
 }
 
 void ParticleFilter::resample() {
