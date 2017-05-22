@@ -20,6 +20,22 @@
 
 using namespace std;
 
+
+// Kevin James
+// May 2017
+
+// Define some functions here since this is the only file that is to be submitted
+std::vector<std::vector<int> > recursive_assoc(std::vector<std::vector<int> > candidates, int idx);
+double mv_gaussian(std::vector<LandmarkObs> const& observations,
+                   std::vector<int> const& associations,
+                   double sigma[2][2],
+                   Map const& landmark_map);
+double gauss2d(std::vector<LandmarkObs> const& observations,
+               std::vector<int> const& associations,
+               double std[2],
+               Map const& landmark_map);
+
+
 void ParticleFilter::init(double x, double y, double theta, double std[]) {
 	// TODO: Set the number of particles. Initialize all particles to first position (based on estimates of 
 	//   x, y, theta and their uncertainties from GPS) and all weights to 1. 
@@ -104,11 +120,6 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 	//   for the fact that the map's y-axis actually points downwards.)
 	//   http://planning.cs.uiuc.edu/node99.html
 
-  // std::cout << "Map:" << std::endl;
-  // for (auto it=map_landmarks.landmark_list.begin(); it!=map_landmarks.landmark_list.end(); it++) {
-  //   cout << "id=" << it->id_i << " x=" << it->x_f << " y=" << it->y_f << std::endl;
-  // }
-  
   double sigma[2][2] = {pow(std_landmark[0],2), 0, 0, pow(std_landmark[1],2)};
   int m = observations.size();
   
@@ -133,9 +144,6 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
       obs.y = yw;
       obs.id = 0;
       obs_world.push_back(obs);
-
-      // std::cout << "particle x=" << xt << " y=" << yt << " theta=" << particle.theta <<
-      //   " obs x=" << xobs << " y=" << yobs << " world obs x=" << xw << " y=" << yw << std::endl;
     }
     
     // Establish correspondences
@@ -146,7 +154,7 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
     int c = 0;
     for (auto ito = obs_world.begin(); ito != obs_world.end(); ito++) {
       for (auto itm = map_landmarks.landmark_list.begin(); itm != map_landmarks.landmark_list.end(); itm++) {
-        // Exclude any landmarks that are out of sensor range
+        // Exclude any landmarks that are out of sensor range (+ margin)
         double dist = sqrt(pow(itm->x_f - xt, 2) + pow(itm->y_f - yt, 2));
         int landmark_id = itm->id_i;
         if (dist <= (sensor_range + 10.0)) {
@@ -154,12 +162,13 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
           // Exclude any association with distance above 10m
           if (dist < 10.0) {
             // Compute the landmark and observation angles and exclude any landmark if angle differs by +/- pi/8 radians
+            //   >>> commented out because this has some problems with angle when offsets are small; can flip across the axis and lose association
             //double rho = atan2(ito->y, ito->x);
             //double landmark_rho = atan2(itm->y_f, itm->x_f);
-            //if (abs(rho - landmark_rho) < M_PI/8) {
+
             candidates.at(c).push_back(landmark_id);  // list of landmark IDs that could associate with this observation
+
             //std::cout << "candidate " << c << " accept landmark " << landmark_id << " x=" << itm->x_f << " y=" << itm->y_f << " world obs x=" << ito->x << " y=" << ito->y << std::endl;
-            //}
           }
         }
       }      
@@ -203,7 +212,7 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
   
 }
 
-std::vector<std::vector<int> > ParticleFilter::recursive_assoc(std::vector<std::vector<int> > candidates, int idx) {
+std::vector<std::vector<int> > recursive_assoc(std::vector<std::vector<int> > candidates, int idx) {
   std::vector<vector<int> > r;
   if (idx == candidates.size() - 1) {
     for (auto it=candidates.at(idx).begin(); it != candidates.at(idx).end(); it++) {
@@ -233,10 +242,10 @@ std::vector<std::vector<int> > ParticleFilter::recursive_assoc(std::vector<std::
   return r;
 }
 
-double ParticleFilter::mv_gaussian(std::vector<LandmarkObs> const& observations,
-                                   std::vector<int> const& associations,
-                                   double sigma[2][2],
-                                   Map const& landmark_map) {
+double mv_gaussian(std::vector<LandmarkObs> const& observations,
+                   std::vector<int> const& associations,
+                   double sigma[2][2],
+                   Map const& landmark_map) {
 
   // 2x2 matrix inverse:
   //   http://www.mathcentre.ac.uk/resources/uploaded/sigma-matrices7-2009-1.pdf
@@ -268,10 +277,10 @@ double ParticleFilter::mv_gaussian(std::vector<LandmarkObs> const& observations,
   return w;
 }
 
-double ParticleFilter::gauss2d(std::vector<LandmarkObs> const& observations,
-                               std::vector<int> const& associations,
-                               double std[2],
-                               Map const& landmark_map) {
+double gauss2d(std::vector<LandmarkObs> const& observations,
+               std::vector<int> const& associations,
+               double std[2],
+               Map const& landmark_map) {
   assert(observations.size() == associations.size());
   double w = 1.0;
   int m = observations.size();
