@@ -44,6 +44,10 @@ class ParticleFilter {
                            std::vector<int> const& associations,
                            double sigma[2][2],
                            Map const& landmark_map);
+        double gauss2d(std::vector<LandmarkObs> const& observations,
+                       std::vector<int> const& associations,
+                       double std[2],
+                       Map const& landmark_map);
 
  public:
 	

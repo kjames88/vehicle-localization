@@ -43,23 +43,6 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
   }
   
   is_initialized = true;
-
-
-  // std::vector<std::vector<int> > test;
-  // std::vector<int> l1 = {1, 2};
-  // std::vector<int> l2 = {3, 6, 5};
-  // std::vector<int> l3 = {6, 7};
-  // std::vector<int> l4 = {8, 9, 10, 11};
-  // test.push_back(l1);
-  // test.push_back(l2);
-  // test.push_back(l3);
-  // test.push_back(l4);
-  // test = recursive_assoc(test, 0);
-  // for (auto it=test.begin(); it!=test.end(); it++) {
-  //   for (auto it2=it->begin(); it2!=it->end(); it2++)
-  //     std::cout << *it2 << ", ";
-  //   std::cout << endl;
-  // }
 }
 
 void ParticleFilter::prediction(double delta_t, double std_pos[], double velocity, double yaw_rate) {
@@ -68,20 +51,34 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 	//  http://en.cppreference.com/w/cpp/numeric/random/normal_distribution
 	//  http://www.cplusplus.com/reference/random/default_random_engine/
   default_random_engine gen;
-  double vtd = velocity / yaw_rate;
-  double tdt = delta_t * yaw_rate;
   // use 0-mean gaussians and add to state instead of creating new distributions for each particle
   normal_distribution<double> dist_x(0, std_pos[0]);
   normal_distribution<double> dist_y(0, std_pos[1]);
   normal_distribution<double> dist_theta(0, std_pos[2]);
-  for (int i=0; i<num_particles; i++) {
-    double theta_0 = particles.at(i).theta;
-    double x_f = particles.at(i).x + (vtd * (sin(theta_0 + tdt) - sin(theta_0)));
-    double y_f = particles.at(i).y + (vtd * (cos(theta_0) - cos(theta_0 + tdt)));
-    double theta_f = theta_0 + tdt;
-    particles.at(i).x = x_f + dist_x(gen);
-    particles.at(i).y = y_f + dist_y(gen);
-    particles.at(i).theta = theta_f + dist_theta(gen);
+  if (abs(yaw_rate) < 1.0e-06) {
+    std::cout << "yaw rate=" << yaw_rate << " using straight model" << std::endl;
+    
+    // 0 yaw rate
+    for (int i=0; i<num_particles; i++) {
+      double vdt = velocity * delta_t;
+      double theta_0 = particles.at(i).theta;
+      particles.at(i).x += (vdt * cos(theta_0)) + dist_x(gen);
+      particles.at(i).y += (vdt * sin(theta_0)) + dist_y(gen);
+      particles.at(i).theta = particles.at(i).theta + dist_theta(gen);
+    }
+  } else {
+    // nonzero yaw rate
+    double vtd = velocity / yaw_rate;
+    double tdt = delta_t * yaw_rate;
+    for (int i=0; i<num_particles; i++) {
+      double theta_0 = particles.at(i).theta;
+      double x_f = particles.at(i).x + (vtd * (sin(theta_0 + tdt) - sin(theta_0)));
+      double y_f = particles.at(i).y + (vtd * (cos(theta_0) - cos(theta_0 + tdt)));
+      double theta_f = theta_0 + tdt;
+      particles.at(i).x = x_f + dist_x(gen);
+      particles.at(i).y = y_f + dist_y(gen);
+      particles.at(i).theta = theta_f + dist_theta(gen);
+    }
   }
 }
 
@@ -185,6 +182,7 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
       std::vector<std::vector<int> > sets = recursive_assoc(candidates, 0);
       for (int idx=0; idx<sets.size(); idx++) {
         double w = mv_gaussian(obs_world, sets.at(idx), sigma, map_landmarks);
+        //double w = gauss2d(obs_world, sets.at(idx), std_landmark, map_landmarks);
         if (w > w_max) {
           w_max = w;
           idx_max = idx;
@@ -197,11 +195,10 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
         sense_y.push_back(obs_world.at(i).y);
       }
       particles.at(p) = SetAssociations(particles.at(p), sets.at(idx_max), sense_x, sense_y);
-      weights[p] = w_max;
+      particles.at(p).weight = w_max;
     } else {
-      weights[p] = 0.0;
+      particles.at(p).weight = 0;
     }
-    particles.at(p).weight = weights[p];
   }
   
 }
@@ -271,11 +268,36 @@ double ParticleFilter::mv_gaussian(std::vector<LandmarkObs> const& observations,
   return w;
 }
 
+double ParticleFilter::gauss2d(std::vector<LandmarkObs> const& observations,
+                               std::vector<int> const& associations,
+                               double std[2],
+                               Map const& landmark_map) {
+  assert(observations.size() == associations.size());
+  double w = 1.0;
+  int m = observations.size();
+  for (int i=0; i<m; i++) {
+    // landmark id is 1-based: adjust it back to 0-based vector position
+    Map::single_landmark_s landmark = landmark_map.landmark_list.at(associations.at(i) - 1);
+    double delta_x = observations.at(i).x - landmark.x_f;
+    double delta_y = observations.at(i).y - landmark.y_f;
+    double e = -0.5 * (((delta_x * delta_x) / (std[0] * std[0])) + ((delta_y * delta_y) / (std[1] * std[1])));
+    e = exp(e);
+    e /= (2.0 * M_PI * std[0] * std[1]);
+    w *= e;
+  }
+  return w;
+}
+
 void ParticleFilter::resample() {
 	// TODO: Resample particles with replacement with probability proportional to their weight. 
 	// NOTE: You may find std::discrete_distribution helpful here.
 	//   http://en.cppreference.com/w/cpp/numeric/random/discrete_distribution
 
+  weights.clear();
+  for (auto it=particles.begin(); it!=particles.end(); it++) {
+    weights.push_back(it->weight);
+  }
+  
   std::random_device rd;
   std::mt19937 gen(rd());
   std::discrete_distribution<> dist(weights.begin(), weights.end());
